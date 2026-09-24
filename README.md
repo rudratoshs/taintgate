@@ -12,6 +12,8 @@
 [![Tests](https://github.com/rudratoshs/taintgate/actions/workflows/tests.yml/badge.svg)](https://github.com/rudratoshs/taintgate/actions/workflows/tests.yml)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
+<img src="https://raw.githubusercontent.com/rudratoshs/taintgate/main/assets/social-preview.png" alt="taintgate: a policy gate for AI agent tool calls that checks where each value came from" width="720">
+
 </div>
 
 ---

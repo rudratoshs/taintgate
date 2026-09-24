@@ -6,6 +6,7 @@
 
 **Stops what prompt-injection classifiers can't see: *where* an instruction came from.**
 
+[![PyPI](https://img.shields.io/pypi/v/taintgate?logo=pypi&logoColor=white)](https://pypi.org/project/taintgate/)
 ![Python](https://img.shields.io/badge/python-3.9+-3776AB?logo=python&logoColor=white)
 ![Dependencies](https://img.shields.io/badge/deps-pyyaml%20only-success)
 [![Tests](https://github.com/rudratoshs/taintgate/actions/workflows/tests.yml/badge.svg)](https://github.com/rudratoshs/taintgate/actions/workflows/tests.yml)
@@ -32,6 +33,12 @@ arrived inside a bill the agent read, not from the user — and **impact** — i
 money. A text classifier sees neither. **taintgate sees both.**
 
 ---
+
+## 📦 Install
+
+```bash
+pip install taintgate
+```
 
 ## ⚡ 30-second demo
 

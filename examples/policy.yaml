@@ -1,0 +1,68 @@
+# Example taintgate policy for a general assistant agent.
+# Every matching rule applies and the strictest wins: deny > ask > allow.
+
+version: 1
+default: ask                     # anything not covered needs a human
+
+# Tool outputs from these tools are untrusted (may contain injections).
+# "*" = every tool output is untrusted, the safe default.
+untrusted_sources: ["*"]
+
+rules:
+  # --- files -----------------------------------------------------------
+  - tool: [read_file, list_files]
+    when: {path: {glob: ["/workspace/**"]}}
+    action: allow
+
+  - tool: "*"
+    when: {"*": {glob: ["**/.ssh/**", "**/.aws/credentials", "**/.env", "/etc/shadow"]}}
+    action: deny
+    reason: secrets and credentials are off limits
+
+  - tool: [delete_file, write_file]
+    when: {path: {not_glob: ["/workspace/**"]}}
+    action: deny
+    reason: writes stay inside the workspace
+
+  # --- network ---------------------------------------------------------
+  - tool: [http_get, http_post, fetch_url]
+    when: {url: {private_host: true}}
+    action: deny
+    reason: no requests to internal hosts or cloud metadata (SSRF)
+
+  - tool: [http_get, fetch_url]
+    when: {url: {host_in: [api.github.com, docs.python.org]}}
+    action: allow
+
+  # --- shell -----------------------------------------------------------
+  - tool: [exec, run_shell]
+    when: {command: {regex: ['\brm\s+-rf\b', 'curl .*\|\s*(ba)?sh', '\bchmod\s+777\b']}}
+    action: deny
+    reason: destructive or remote-code shell command
+
+  # --- money and messages: where provenance matters ---------------------
+  - tool: [send_money, schedule_transaction, update_scheduled_transaction]
+    when: {recipient: {untrusted: true}}
+    action: ask
+    reason: recipient came from tool output, not from the user
+
+  - tool: [send_money, schedule_transaction]
+    when: {amount: {min: 1000}}
+    action: ask
+    reason: large payment
+
+  - tool: [send_money]
+    when: {recipient: {from_user: true}, amount: {max: 999.99}}
+    action: allow
+    reason: small payment to a recipient the user typed
+
+  - tool: [send_email, send_message, post_webpage]
+    when: {"*": {untrusted: true}, recipient: {host_not_in: [mycompany.com]}}
+    action: ask
+    reason: sending content from tool output to an outside address
+
+  - tool: [send_email, send_message]
+    tainted: true
+    when: {recipient: {untrusted: true}}
+    action: deny
+    reason: recipient address was supplied by untrusted content

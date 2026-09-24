@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "taintgate"
+version = "0.1.0"
+description = "A policy gate for AI agent tool calls, with provenance tracking. Blocks what prompt-injection classifiers miss."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.9"
+authors = [{ name = "Rudratosh Shastri" }]
+keywords = ["ai-agents", "llm-security", "prompt-injection", "mcp", "guardrails", "policy"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Security",
+    "Programming Language :: Python :: 3",
+]
+dependencies = ["pyyaml>=6"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+taintgate = "taintgate.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/rudratoshs/taintgate"
+Benchmark = "https://github.com/rudratoshs/buried-injections"

@@ -1,0 +1,73 @@
+# Example taintgate policy for a coding agent (editor + shell + git).
+# Tool names follow common coding-agent / MCP filesystem and process schemas.
+# Every matching rule applies and the strictest wins: deny > ask > allow.
+
+version: 1
+default: ask
+
+# Treat every tool result as untrusted. Injected instructions often arrive
+# in file contents, web pages, issue comments, and command output.
+untrusted_sources: ["*"]
+
+rules:
+  # --- workspace reads -------------------------------------------------
+  - tool: [read_file, read_text_file, list_files, list_directory, glob, grep, search_files]
+    when: {path: {glob: ["/workspace/**"]}}
+    action: allow
+    reason: read access inside the workspace
+
+  - tool: [read_file, read_text_file, list_files, list_directory]
+    when: {path: {glob: ["**/.git/**"]}}
+    action: allow
+    reason: inspect repository metadata
+
+  # --- secrets stay off limits even inside the workspace ---------------
+  - tool: "*"
+    when: {"*": {glob: ["**/.ssh/**", "**/.aws/credentials", "**/.env", "**/.env.*", "/etc/shadow", "**/id_rsa", "**/id_ed25519"]}}
+    action: deny
+    reason: secrets and credentials are off limits
+
+  # --- writes stay inside the workspace --------------------------------
+  - tool: [write_file, write_text_file, edit_file, apply_patch, delete_file, move_file, create_directory]
+    when: {path: {not_glob: ["/workspace/**"]}}
+    action: deny
+    reason: writes stay inside the workspace
+
+  - tool: [write_file, write_text_file, edit_file, apply_patch]
+    when: {path: {glob: ["/workspace/**"]}}
+    action: allow
+    reason: edit files in the workspace
+
+  # --- network / SSRF --------------------------------------------------
+  - tool: [http_get, http_post, fetch_url, web_fetch, web_search]
+    when: {url: {private_host: true}}
+    action: deny
+    reason: no requests to internal hosts or cloud metadata (SSRF)
+
+  - tool: [http_get, fetch_url, web_fetch]
+    when: {url: {host_in: [api.github.com, docs.python.org, pypi.org, registry.npmjs.org]}}
+    action: allow
+    reason: allowlisted public docs and package registries
+
+  # --- shell -----------------------------------------------------------
+  - tool: [exec, run_shell, bash, run_terminal_cmd]
+    when: {command: {regex: ['\brm\s+-rf\b', 'curl .*\|\s*(ba)?sh', 'wget .*\|\s*(ba)?sh', '\bchmod\s+777\b', ':\(\)\s*\{']}}
+    action: deny
+    reason: destructive or remote-code shell command
+
+  - tool: [exec, run_shell, bash, run_terminal_cmd]
+    when: {command: {regex: ['\bgit\s+(push|commit|checkout|status|diff|log|add)\b']}}
+    action: allow
+    reason: routine git workflow
+
+  - tool: [exec, run_shell, bash, run_terminal_cmd]
+    when: {command: {regex: ['\b(pytest|python|uv|npm|npx|pip|ruff|mypy)\b']}}
+    action: allow
+    reason: local test and package commands
+
+  # --- outbound actions after the session is tainted -------------------
+  - tool: [send_email, create_issue_comment, post_review, git_push]
+    tainted: true
+    when: {"*": {untrusted: true}}
+    action: ask
+    reason: publishing content that originated in tool output

@@ -1,0 +1,66 @@
+# Example taintgate policy for an MCP server exposing filesystem, fetch, and
+# shell tools to a client. Put this in front of the server (or wrap each tool
+# with session.wrap) so the client cannot use MCP as an SSRF or secret oracle.
+#
+# Tool names match the common MCP filesystem / fetch / shell servers.
+
+version: 1
+default: deny                    # MCP surface is explicit: unknown tools fail closed
+
+untrusted_sources:
+  - read_file
+  - read_text_file
+  - fetch
+  - fetch_url
+  - http_get
+  - list_directory
+
+rules:
+  # --- filesystem: root-restricted reads -------------------------------
+  - tool: [read_file, read_text_file, list_directory, directory_tree, search_files]
+    when: {path: {glob: ["/workspace/**"]}}
+    action: allow
+    reason: MCP filesystem root
+
+  - tool: "*"
+    when: {"*": {glob: ["**/.ssh/**", "**/.aws/credentials", "**/.env", "**/.env.*", "/etc/shadow", "**/id_rsa", "**/id_ed25519", "**/credentials.json"]}}
+    action: deny
+    reason: secrets and credentials are off limits
+
+  - tool: [write_file, write_text_file, edit_file, create_directory, move_file, delete_file]
+    when: {path: {not_glob: ["/workspace/**"]}}
+    action: deny
+    reason: MCP writes stay inside the filesystem root
+
+  - tool: [write_file, write_text_file, edit_file, create_directory]
+    when: {path: {glob: ["/workspace/**"]}}
+    action: allow
+    reason: write inside the MCP filesystem root
+
+  # --- fetch: no internal network --------------------------------------
+  - tool: [fetch, fetch_url, http_get, http_post]
+    when: {url: {private_host: true}}
+    action: deny
+    reason: no requests to internal hosts or cloud metadata (SSRF)
+
+  - tool: [fetch, fetch_url, http_get]
+    when: {url: {host_in: [api.github.com, docs.python.org, pypi.org]}}
+    action: allow
+    reason: allowlisted public hosts
+
+  # --- shell exposed over MCP is high impact ---------------------------
+  - tool: [run_command, exec, bash]
+    when: {command: {regex: ['\brm\s+-rf\b', 'curl .*\|\s*(ba)?sh', '\bchmod\s+777\b', ':\(\)\s*\{']}}
+    action: deny
+    reason: destructive or remote-code shell command
+
+  - tool: [run_command, exec, bash]
+    when: {command: {regex: ['\b(ls|cat|pwd|echo|python|pytest|git status|git diff|git log)\b']}}
+    action: allow
+    reason: read-mostly local commands
+
+  # --- anything that leaves the host after untrusted input -------------
+  - tool: [send_email, http_post]
+    tainted: true
+    action: ask
+    reason: outbound call after the session saw untrusted content

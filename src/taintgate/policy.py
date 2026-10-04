@@ -66,12 +66,15 @@ class Rule:
     action: str
     when: dict = None           # {arg name or "*": {matcher: operand}}
     tainted: bool = None        # only match when the session's taint equals this
+    egress: bool = None         # only match when the tool's egress class equals this
     reason: str = ""
 
-    def matches(self, tool, args, session):
+    def matches(self, tool, args, session, is_egress=False):
         if not any(fnmatch.fnmatchcase(tool, pattern) for pattern in self.tool):
             return False
         if self.tainted is not None and (session is not None and session.tainted) != self.tainted:
+            return False
+        if self.egress is not None and bool(is_egress) != self.egress:
             return False
         for arg, spec in (self.when or {}).items():
             if arg == "*":
@@ -98,12 +101,13 @@ def _leaf_values(value):
 
 
 class Policy:
-    def __init__(self, rules, default="ask", untrusted_sources=("*",)):
+    def __init__(self, rules, default="ask", untrusted_sources=("*",), egress_tools=()):
         if default not in ACTIONS:
             raise PolicyError(f"default must be one of {ACTIONS}, got {default!r}")
         self.rules = rules
         self.default = default
         self.untrusted_sources = list(untrusted_sources)
+        self.egress_tools = list(egress_tools)   # tools that send data out of the trust boundary
 
     # --- loading -----------------------------------------------------------
 
@@ -111,12 +115,13 @@ class Policy:
     def from_dict(cls, data):
         if not isinstance(data, dict):
             raise PolicyError("policy must be a mapping")
-        unknown = set(data) - {"version", "default", "untrusted_sources", "rules"}
+        unknown = set(data) - {"version", "default", "untrusted_sources", "egress_tools", "rules"}
         if unknown:
             raise PolicyError(f"unknown top-level keys: {sorted(unknown)}")
         rules = [_parse_rule(raw, i) for i, raw in enumerate(data.get("rules") or [])]
         sources = data.get("untrusted_sources", ["*"])
-        return cls(rules, data.get("default", "ask"), _as_list(sources))
+        egress = data.get("egress_tools", [])
+        return cls(rules, data.get("default", "ask"), _as_list(sources), _as_list(egress))
 
     @classmethod
     def from_yaml(cls, path):
@@ -129,11 +134,16 @@ class Policy:
     def is_untrusted_source(self, tool):
         return any(fnmatch.fnmatchcase(tool, p) for p in self.untrusted_sources)
 
+    def is_egress(self, tool):
+        """True if the tool can send data out of the trust boundary (open-world)."""
+        return any(fnmatch.fnmatchcase(tool, p) for p in self.egress_tools)
+
     def check(self, tool, args=None, session=None):
         """Decide one tool call. Pass a Session to enable taint/provenance rules."""
         args = args or {}
         digest = args_digest(args)
-        matched = [r for r in self.rules if r.matches(tool, args, session)]
+        is_egress = self.is_egress(tool)
+        matched = [r for r in self.rules if r.matches(tool, args, session, is_egress)]
         if not matched:
             return Decision(self.default, tool, args_digest=digest)
         action = max((r.action for r in matched), key=STRICTNESS.get)
@@ -149,7 +159,7 @@ def _parse_rule(raw, index):
     where = f"rules[{index}]"
     if not isinstance(raw, dict):
         raise PolicyError(f"{where} must be a mapping")
-    unknown = set(raw) - {"tool", "action", "when", "tainted", "reason"}
+    unknown = set(raw) - {"tool", "action", "when", "tainted", "egress", "reason"}
     if unknown:
         raise PolicyError(f"{where}: unknown keys {sorted(unknown)}")
     if "tool" not in raw or raw.get("action") not in ACTIONS:
@@ -167,4 +177,7 @@ def _parse_rule(raw, index):
     tainted = raw.get("tainted")
     if tainted is not None and not isinstance(tainted, bool):
         raise PolicyError(f"{where}.tainted must be true or false")
-    return Rule(_as_list(raw["tool"]), raw["action"], when, tainted, raw.get("reason", ""))
+    egress = raw.get("egress")
+    if egress is not None and not isinstance(egress, bool):
+        raise PolicyError(f"{where}.egress must be true or false")
+    return Rule(_as_list(raw["tool"]), raw["action"], when, tainted, egress, raw.get("reason", ""))

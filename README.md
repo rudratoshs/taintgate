@@ -178,6 +178,26 @@ Use `"*"` as the argument name to match **any** argument, including values neste
 inside lists and dicts. Add `tainted: true` to a rule to apply it only after the agent
 has seen untrusted content.
 
+### Two risk axes: provenance and egress
+
+Destructiveness is not the only axis. `delete_file` is destructive but **local**;
+`http_post` / `send_email` are not destructive in that sense but can **exfiltrate** —
+and that is where a buried injection usually cashes out (untrusted data picks a
+destination, secrets leave the boundary). List the open-world tools under
+`egress_tools:` and match on `egress:` in a rule. It composes with `tainted:` through
+the normal strictest-wins model, so the two axes combine without a rule per tool:
+
+```yaml
+egress_tools: [http_post, fetch_url, send_email, send_message]
+
+rules:
+  - tool: "*"            # any open-world tool, once the session is tainted,
+    egress: true         # needs a human — this closes the laundering path where
+    tainted: true        # untrusted data enters via a loose read-only tool and
+    action: ask          # leaves via an outbound one.
+    reason: outbound call after untrusted content entered the session
+```
+
 ---
 
 ## ⚠️ Limitations (read these)

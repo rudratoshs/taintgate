@@ -8,6 +8,12 @@ default: ask                     # anything not covered needs a human
 # "*" = every tool output is untrusted, the safe default.
 untrusted_sources: ["*"]
 
+# Tools that send data out of the trust boundary (open-world). This is a
+# separate risk axis from destructiveness: delete_file is destructive but
+# local; http_post / send_email can exfiltrate. Rules can match on `egress:`
+# and compose it with `tainted:` (see the catch-all outbound rule below).
+egress_tools: [http_post, fetch_url, send_email, send_message, post_webpage]
+
 rules:
   # --- files -----------------------------------------------------------
   - tool: [read_file, list_files]
@@ -66,3 +72,14 @@ rules:
     when: {recipient: {untrusted: true}}
     action: deny
     reason: recipient address was supplied by untrusted content
+
+  # --- the two-axis catch-all: open-world x provenance ------------------
+  # Any egress tool, once the session has seen untrusted content, needs a
+  # human — independent of which specific tool it is. This closes the
+  # laundering path where untrusted data enters via a loose read-only tool
+  # and leaves via an outbound one.
+  - tool: "*"
+    egress: true
+    tainted: true
+    action: ask
+    reason: outbound call after untrusted content entered the session

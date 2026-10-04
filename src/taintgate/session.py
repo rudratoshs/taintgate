@@ -57,6 +57,11 @@ class Session:
                 decision.action == "ask" and not (approve and approve(decision, args))
             ):
                 raise ToolCallBlocked(decision)
+            # Approval binds to the value approved: if the approver (or anything
+            # else) changed the args after the decision, the digest no longer
+            # matches and the call is blocked rather than dispatched silently.
+            if not decision.matches_args(args):
+                raise ToolCallBlocked(decision)
             result = fn(**args)
             self.observe(tool, result)
             return result

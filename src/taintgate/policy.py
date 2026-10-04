@@ -7,12 +7,29 @@ hole: an `allow` listed first never overrides a later `deny`.
 """
 
 import fnmatch
+import hashlib
+import json
 from dataclasses import dataclass, field
 
 from .matchers import MATCHERS, check_matchers
 
 ACTIONS = ("allow", "ask", "deny")
 STRICTNESS = {action: rank for rank, action in enumerate(ACTIONS)}
+
+
+def args_digest(args):
+    """A stable fingerprint of a call's arguments.
+
+    Provenance says where a value came from; this says *which exact value* a
+    decision was made about. Two calls fingerprint the same only if their args
+    are equal after a canonical JSON serialisation (keys sorted, non-JSON
+    values via str). It is what ties an approval to the value approved: a
+    recipient re-derived, re-fetched or re-encoded between the check and the
+    dispatch produces a different digest, so the binding fails even when the
+    new value's provenance still looks clean.
+    """
+    blob = json.dumps(args or {}, sort_keys=True, default=str, separators=(",", ":"))
+    return hashlib.sha256(blob.encode()).hexdigest()
 
 
 class PolicyError(ValueError):
@@ -24,10 +41,19 @@ class Decision:
     action: str                                  # "allow" | "ask" | "deny"
     tool: str
     reasons: list = field(default_factory=list)  # one per matched rule
+    args_digest: str = None                      # fingerprint of the args decided on
 
     @property
     def allowed(self):
         return self.action == "allow"
+
+    def matches_args(self, args):
+        """True if `args` is byte-identical (after canonical JSON) to the args
+        this decision was made about. Use before dispatching an approved call:
+        a value changed since the decision — re-derived, re-fetched, re-encoded
+        — will not match, even if its provenance still looks clean. Returns
+        False if this decision carries no digest (made without args)."""
+        return self.args_digest is not None and self.args_digest == args_digest(args)
 
     def __str__(self):
         why = "; ".join(self.reasons) or "default policy"
@@ -106,12 +132,13 @@ class Policy:
     def check(self, tool, args=None, session=None):
         """Decide one tool call. Pass a Session to enable taint/provenance rules."""
         args = args or {}
+        digest = args_digest(args)
         matched = [r for r in self.rules if r.matches(tool, args, session)]
         if not matched:
-            return Decision(self.default, tool)
+            return Decision(self.default, tool, args_digest=digest)
         action = max((r.action for r in matched), key=STRICTNESS.get)
         reasons = [r.describe() for r in matched if r.action == action]
-        return Decision(action, tool, reasons)
+        return Decision(action, tool, reasons, args_digest=digest)
 
 
 def _as_list(value):
